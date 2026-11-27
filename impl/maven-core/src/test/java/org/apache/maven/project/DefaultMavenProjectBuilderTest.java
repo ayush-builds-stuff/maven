@@ -37,8 +37,8 @@ import org.apache.maven.api.services.Sources;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.impl.InternalSession;
-import org.apache.maven.internal.impl.DefaultProject;
 import org.apache.maven.internal.impl.InternalMavenSession;
+import org.apache.maven.internal.impl.LegacyProjectAdapter;
 import org.apache.maven.model.Profile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -397,7 +397,7 @@ class DefaultMavenProjectBuilderTest extends AbstractMavenProjectTestCase {
 
             InternalMavenSession session = Mockito.mock(InternalMavenSession.class);
             List<org.apache.maven.api.model.Profile> activeProfiles =
-                    new DefaultProject(session, project).getDeclaredActiveProfiles();
+                    LegacyProjectAdapter.snapshot(session, project).getDeclaredActiveProfiles();
             assertEquals(1, activeProfiles.size());
             org.apache.maven.api.model.Profile profile = activeProfiles.get(0);
             assertEquals("active-by-default", profile.getId());
@@ -478,7 +478,7 @@ class DefaultMavenProjectBuilderTest extends AbstractMavenProjectTestCase {
 
             InternalMavenSession session = Mockito.mock(InternalMavenSession.class);
             List<org.apache.maven.api.model.Profile> activeProfiles =
-                    new DefaultProject(session, project).getDeclaredActiveProfiles();
+                    LegacyProjectAdapter.snapshot(session, project).getDeclaredActiveProfiles();
             assertEquals(2, activeProfiles.size());
             org.apache.maven.api.model.Profile profile = activeProfiles.get(0);
             assertEquals("active-by-default", profile.getId());

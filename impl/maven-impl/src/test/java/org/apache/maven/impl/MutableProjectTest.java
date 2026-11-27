@@ -18,49 +18,76 @@
  */
 package org.apache.maven.impl;
 
-import java.util.stream.IntStream;
+import java.util.List;
+import java.util.Properties;
 
 import org.apache.maven.api.Project;
+import org.apache.maven.api.SourceRoot;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class MutableProjectTest {
 
     @Test
-    void exposesInitialProject() {
-        Project project = project(0);
-
-        assertSame(project, new MutableProject(project).project());
-    }
-
-    @Test
-    void rejectsNullProjectsAndUpdates() {
-        assertThrows(NullPointerException.class, () -> new MutableProject(null));
-
-        MutableProject project = new MutableProject(project(0));
-        assertThrows(NullPointerException.class, () -> project.update(null));
-        assertThrows(NullPointerException.class, () -> project.update(current -> null));
-    }
-
-    @Test
-    void updatesAtomically() {
-        MutableProject project = new MutableProject(project(0));
-
-        IntStream.range(0, 100)
-                .parallel()
-                .forEach(i -> project.update(current -> project(Integer.parseInt(current.version()) + 1)));
-
-        assertEquals("100", project.project().version());
-    }
-
-    private static Project project(int version) {
+    void initializesProjectOnce() {
+        MutableProject<String> mutableProject = new MutableProject<>();
         Project project = mock(Project.class);
-        when(project.version()).thenReturn(Integer.toString(version));
-        return project;
+
+        assertNull(mutableProject.projectOrNull());
+        assertThrows(NullPointerException.class, mutableProject::project);
+
+        mutableProject.initialize(project);
+        mutableProject.initialize(project);
+
+        assertSame(project, mutableProject.project());
+        assertThrows(IllegalStateException.class, () -> mutableProject.initialize(mock(Project.class)));
+    }
+
+    @Test
+    void rejectsNullProject() {
+        MutableProject<String> project = new MutableProject<>();
+        assertThrows(NullPointerException.class, () -> project.initialize(null));
+    }
+
+    @Test
+    void replacesOnlyTheExpectedProject() {
+        MutableProject<String> mutableProject = new MutableProject<>();
+        Project original = mock(Project.class);
+        Project replacement = mock(Project.class);
+        mutableProject.initialize(original);
+
+        mutableProject.replace(original, replacement);
+
+        assertSame(replacement, mutableProject.project());
+        assertThrows(IllegalStateException.class, () -> mutableProject.replace(original, mock(Project.class)));
+    }
+
+    @Test
+    void ownsBuildTimeState() {
+        MutableProject<String> project = new MutableProject<>();
+        SourceRoot sourceRoot = mock(SourceRoot.class);
+        SourceRoot replacement = mock(SourceRoot.class);
+        SourceRoot secondSourceRoot = mock(SourceRoot.class);
+        Properties properties = new Properties();
+        properties.setProperty("key", "value");
+
+        project.addSourceRoot(sourceRoot);
+        project.addSourceRoot(sourceRoot);
+        project.addSourceRoot(secondSourceRoot);
+        project.replaceSourceRoot(source -> source == sourceRoot, replacement);
+        project.addAttachedArtifact("first");
+        project.addAttachedArtifact("second");
+        project.setProperties(properties);
+
+        assertEquals(
+                List.of(replacement, secondSourceRoot),
+                project.sourceRoots().stream().toList());
+        assertEquals(List.of("first", "second"), project.attachedArtifacts());
+        assertSame(properties, project.properties());
     }
 }

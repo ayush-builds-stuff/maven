@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import org.apache.maven.api.Packaging;
 import org.apache.maven.api.Project;
 import org.apache.maven.api.Session;
+import org.apache.maven.api.model.Model;
 import org.apache.maven.api.services.RequestTrace;
 import org.apache.maven.execution.DefaultMavenExecutionRequest;
 import org.apache.maven.execution.MavenSession;
@@ -185,20 +186,37 @@ public class DefaultSessionTest {
     }
 
     @Test
-    void updatingOneSameGavProjectReplacesOnlyItsSnapshot() {
+    void legacyBuildStateMutationDoesNotReplaceSnapshot() {
         DefaultSession session = projectSession();
         MavenProject first = project("first");
         MavenProject second = project("second");
         Project originalFirst = session.getProject(first);
         Project originalSecond = session.getProject(second);
 
-        first.setVersion("2.0");
-        Project updatedFirst = session.updateProject(originalFirst);
+        first.getProperties().setProperty("key", "value");
 
-        assertEquals("1.0", originalFirst.version());
-        assertEquals("2.0", updatedFirst.version());
-        assertSame(updatedFirst, session.getProject(first));
+        assertEquals(
+                "value", session.getMutableProject(originalFirst).properties().getProperty("key"));
+        assertSame(originalFirst, session.getProject(first));
         assertSame(originalSecond, session.getProject(second));
+    }
+
+    @Test
+    void replacingProjectModelUpdatesCurrentSnapshotAndKeepsReverseMapping() {
+        DefaultSession session = projectSession();
+        MavenProject mavenProject = project("transformed");
+        Project original = session.getProject(mavenProject);
+        Model transformedModel = original.model().withProperties(java.util.Map.of("injected", "true"));
+
+        Project replacement = session.replaceProjectModel(original, transformedModel);
+
+        assertNotSame(original, replacement);
+        assertSame(replacement, session.getProject(mavenProject));
+        assertSame(mavenProject, session.getMavenProject(original));
+        assertSame(mavenProject, session.getMavenProject(replacement));
+        assertNull(original.model().getProperties().get("injected"));
+        assertEquals("true", replacement.model().getProperties().get("injected"));
+        assertEquals("true", session.getMutableProject(replacement).properties().getProperty("injected"));
     }
 
     @Test

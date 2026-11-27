@@ -46,7 +46,6 @@ import org.apache.maven.execution.MavenSession;
 import org.apache.maven.impl.model.reflection.IntrospectionException;
 import org.apache.maven.internal.impl.DefaultLookup;
 import org.apache.maven.internal.impl.DefaultMojoExecution;
-import org.apache.maven.internal.impl.DefaultProject;
 import org.apache.maven.internal.impl.DefaultSession;
 import org.apache.maven.internal.impl.InternalMavenSession;
 import org.apache.maven.model.Build;
@@ -384,7 +383,7 @@ public class PluginParameterExpressionEvaluatorV4Test extends AbstractCoreMavenC
         MojoExecution mojoExecution = newMojoExecution(session);
 
         return new PluginParameterExpressionEvaluatorV4(
-                session, project != null ? new DefaultProject(session, project) : null, mojoExecution);
+                session, project != null ? session.getProject(project) : null, mojoExecution);
     }
 
     private MojoExecution newMojoExecution(Session session) {

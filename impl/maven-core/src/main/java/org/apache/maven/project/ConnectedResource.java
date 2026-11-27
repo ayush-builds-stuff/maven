@@ -19,7 +19,6 @@
 package org.apache.maven.project;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.maven.api.ProjectScope;
@@ -105,30 +104,13 @@ class ConnectedResource extends Resource {
     }
 
     private void updateProjectSourceRoot() {
-        // Convert the LinkedHashSet to a List to maintain order
-        List<SourceRoot> sourcesList = new ArrayList<>(project.sources);
-
-        // Find the index of the original SourceRoot
-        int index = -1;
-        for (int i = 0; i < sourcesList.size(); i++) {
-            SourceRoot source = sourcesList.get(i);
-            if (source.scope() == originalSourceRoot.scope()
-                    && source.language() == originalSourceRoot.language()
-                    && source.directory().equals(originalSourceRoot.directory())) {
-                index = i;
-                break;
-            }
-        }
-
-        if (index >= 0) {
-            // Replace the SourceRoot at the same position
-            SourceRoot newSourceRoot = new DefaultSourceRoot(
-                    project.getBaseDirectory(), scope, this.getDelegate(), originalSourceRoot.generated());
-            sourcesList.set(index, newSourceRoot);
-
-            // Update the project's sources, preserving order
-            project.sources.clear();
-            project.sources.addAll(sourcesList);
-        }
+        SourceRoot replacement = new DefaultSourceRoot(
+                project.getBaseDirectory(), scope, this.getDelegate(), originalSourceRoot.generated());
+        project.getMutableProject()
+                .replaceSourceRoot(
+                        source -> source.scope() == originalSourceRoot.scope()
+                                && source.language() == originalSourceRoot.language()
+                                && source.directory().equals(originalSourceRoot.directory()),
+                        replacement);
     }
 }

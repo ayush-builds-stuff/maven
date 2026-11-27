@@ -47,6 +47,7 @@ import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.impl.DefaultSourceRoot;
 import org.apache.maven.impl.InternalSession;
 import org.apache.maven.impl.MappedList;
+import org.apache.maven.impl.MutableProject;
 import org.apache.maven.impl.PropertiesAsMap;
 import org.apache.maven.project.MavenProject;
 import org.eclipse.sisu.Typed;
@@ -77,7 +78,10 @@ public class DefaultProjectManager implements ProjectManager {
     @Override
     public Optional<Path> getPath(@Nonnull Project project) {
         requireNonNull(project, "project" + " cannot be null");
-        Optional<ProducedArtifact> mainArtifact = getCurrentProject(project).getMainArtifact();
+        if (hasModuleSourceHierarchy(project)) {
+            return Optional.empty();
+        }
+        Optional<ProducedArtifact> mainArtifact = project.getMainArtifact();
         return mainArtifact.flatMap(artifactManager::getPath);
     }
 
@@ -86,7 +90,7 @@ public class DefaultProjectManager implements ProjectManager {
     public Collection<ProducedArtifact> getAttachedArtifacts(@Nonnull Project project) {
         requireNonNull(project, "project" + " cannot be null");
         Collection<ProducedArtifact> attached = map(
-                getMavenProject(project).getAttachedArtifacts(),
+                getMutableProject(project).attachedArtifacts(),
                 a -> getSession(project).getArtifact(ProducedArtifact.class, RepositoryUtils.toArtifact(a)));
         return Collections.unmodifiableCollection(attached);
     }
@@ -96,7 +100,11 @@ public class DefaultProjectManager implements ProjectManager {
     public Collection<ProducedArtifact> getAllArtifacts(@Nonnull Project project) {
         requireNonNull(project, "project cannot be null");
         ArrayList<ProducedArtifact> result = new ArrayList<>(2);
-        result.addAll(getCurrentProject(project).getArtifacts());
+        List<ProducedArtifact> projectArtifacts = project.getArtifacts();
+        result.addAll(
+                hasModuleSourceHierarchy(project) && projectArtifacts.size() == 2
+                        ? projectArtifacts.subList(0, 1)
+                        : projectArtifacts);
         result.addAll(getAttachedArtifacts(project));
         return Collections.unmodifiableCollection(result);
     }
@@ -170,32 +178,32 @@ public class DefaultProjectManager implements ProjectManager {
             }
             throw new IllegalArgumentException(message);
         }
-        getMavenProject(project)
+        getMutableProject(project)
                 .addAttachedArtifact(
                         RepositoryUtils.toArtifact(getSession(project).toArtifact(artifact)));
-        session.updateProject(project);
         artifactManager.setPath(artifact, path);
     }
 
     @Nonnull
     @Override
     public Collection<SourceRoot> getSourceRoots(@Nonnull Project project) {
-        MavenProject prj = getMavenProject(requireNonNull(project, "project" + " cannot be null"));
-        return prj.getSourceRoots();
+        return getMutableProject(requireNonNull(project, "project" + " cannot be null"))
+                .sourceRoots();
     }
 
     @Nonnull
     @Override
     public Stream<SourceRoot> getEnabledSourceRoots(@Nonnull Project project, ProjectScope scope, Language language) {
-        MavenProject prj = getMavenProject(requireNonNull(project, "project" + " cannot be null"));
-        return prj.getEnabledSourceRoots(scope, language);
+        return getSourceRoots(requireNonNull(project, "project" + " cannot be null")).stream()
+                .filter(SourceRoot::enabled)
+                .filter(source -> scope == null || scope == source.scope())
+                .filter(source -> language == null || language == source.language());
     }
 
     @Override
     public void addSourceRoot(@Nonnull Project project, @Nonnull SourceRoot source) {
-        MavenProject prj = getMavenProject(requireNonNull(project, "project" + " cannot be null"));
-        prj.addSourceRoot(requireNonNull(source, "source" + " cannot be null"));
-        session.updateProject(project);
+        getMutableProject(requireNonNull(project, "project" + " cannot be null"))
+                .addSourceRoot(requireNonNull(source, "source" + " cannot be null"));
     }
 
     @Override
@@ -214,19 +222,20 @@ public class DefaultProjectManager implements ProjectManager {
             @Nonnull Language language,
             @Nonnull Path directory,
             boolean generated) {
-        MavenProject prj = getMavenProject(requireNonNull(project, "project" + " cannot be null"));
-        Path resolved = prj.getBaseDirectory()
+        Project actualProject = requireNonNull(project, "project" + " cannot be null");
+        Path resolved = actualProject
+                .getBasedir()
                 .resolve(requireNonNull(directory, "directory" + " cannot be null"))
                 .normalize();
         ProjectScope actualScope = requireNonNull(scope, "scope" + " cannot be null");
         Language actualLanguage = requireNonNull(language, "language" + " cannot be null");
-        boolean exists = prj.getSourceRoots().stream()
+        MutableProject<org.apache.maven.artifact.Artifact> mutableProject = getMutableProject(actualProject);
+        boolean exists = mutableProject.sourceRoots().stream()
                 .anyMatch(source -> source.scope() == actualScope
                         && source.language() == actualLanguage
                         && source.directory().equals(resolved));
         if (!exists) {
-            prj.addSourceRoot(new DefaultSourceRoot(actualScope, actualLanguage, resolved, generated));
-            session.updateProject(project);
+            mutableProject.addSourceRoot(new DefaultSourceRoot(actualScope, actualLanguage, resolved, generated));
         }
     }
 
@@ -246,20 +255,19 @@ public class DefaultProjectManager implements ProjectManager {
 
     @Override
     public void setProperty(@Nonnull Project project, @Nonnull String key, String value) {
-        Properties properties = getMavenProject(project).getProperties();
+        Properties properties = getMutableProject(project).properties();
         if (value == null) {
             properties.remove(key);
         } else {
             properties.setProperty(key, value);
         }
-        session.updateProject(project);
     }
 
     @Override
     @Nonnull
     public Map<String, String> getProperties(@Nonnull Project project) {
         return Collections.unmodifiableMap(
-                new PropertiesAsMap(getMavenProject(project).getProperties()));
+                new PropertiesAsMap(getMutableProject(project).properties()));
     }
 
     @Override
@@ -273,8 +281,14 @@ public class DefaultProjectManager implements ProjectManager {
         return requireNonNull(session.getMavenProject(project), "project is not associated with session");
     }
 
-    private Project getCurrentProject(Project project) {
-        return ((DefaultProject) project).mutableProject().project();
+    private MutableProject<org.apache.maven.artifact.Artifact> getMutableProject(Project project) {
+        return session.getMutableProject(project);
+    }
+
+    private boolean hasModuleSourceHierarchy(Project project) {
+        return getSourceRoots(project).stream()
+                .filter(SourceRoot::enabled)
+                .anyMatch(source -> source.module().isPresent());
     }
 
     private static InternalSession getSession(Project project) {

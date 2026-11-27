@@ -83,6 +83,35 @@ class DefaultProjectManagerTest {
     }
 
     @Test
+    void legacyFacadeMutationsAreVisibleThroughProjectManager() throws Exception {
+        InternalMavenSession session = Mockito.mock(InternalMavenSession.class);
+        MavenProject mavenProject = new MavenProject();
+        mavenProject.setFile(
+                Path.of("target", "project", "pom.xml").toAbsolutePath().toFile());
+        Project project = project(session, mavenProject);
+        DefaultProjectManager projectManager = new DefaultProjectManager(session, Mockito.mock(ArtifactManager.class));
+        SourceRoot sourceRoot = new DefaultSourceRoot(
+                ProjectScope.MAIN, Language.JAVA_FAMILY, Path.of("target", "project", "src", "main", "java"));
+        org.apache.maven.artifact.Artifact attachedArtifact = new org.apache.maven.artifact.DefaultArtifact(
+                "group", "artifact", "1.0", "compile", "jar", "tests", new TestArtifactHandler("jar"));
+        ProducedArtifact producedArtifact = Mockito.mock(ProducedArtifact.class);
+        when(session.getArtifact(Mockito.eq(ProducedArtifact.class), Mockito.any()))
+                .thenReturn(producedArtifact);
+
+        mavenProject.addSourceRoot(sourceRoot);
+        mavenProject.addAttachedArtifact(attachedArtifact);
+        mavenProject.getProperties().setProperty("key", "value");
+
+        assertEquals(
+                List.of(sourceRoot),
+                projectManager.getSourceRoots(project).stream().toList());
+        assertEquals(
+                List.of(producedArtifact),
+                projectManager.getAttachedArtifacts(project).stream().toList());
+        assertEquals("value", projectManager.getProperties(project).get("key"));
+    }
+
+    @Test
     void attachArtifact() {
         InternalMavenSession session = Mockito.mock(InternalMavenSession.class);
         ArtifactManager artifactManager = Mockito.mock(ArtifactManager.class);
@@ -100,6 +129,9 @@ class DefaultProjectManagerTest {
         when(artifact.getGroupId()).thenReturn("myGroup");
         when(artifact.getArtifactId()).thenReturn("myArtifact");
         when(artifact.getBaseVersion()).thenReturn(versionParser.parseVersion("1.0-SNAPSHOT"));
+        when(session.toArtifact(artifact))
+                .thenReturn(new org.eclipse.aether.artifact.DefaultArtifact(
+                        "myGroup", "myArtifact", "", "jar", "1.0-SNAPSHOT"));
         projectManager.attachArtifact(project, artifact, artifactPath);
 
         // Verify that an exception is thrown when the artifactId differs
@@ -397,20 +429,11 @@ class DefaultProjectManagerTest {
                         null,
                         true));
 
-        Project updatedProject = ((DefaultProject) project).mutableProject().project();
-
-        // The original snapshot is stable; the holder exposes the replacement state.
+        // The immutable project is stable while the holder owns the new build-time state.
+        assertSame(project, mavenProject.getMutableProject().project());
         assertTrue(project.producesMainArtifact());
-        assertTrue(updatedProject.packaging().producesMainArtifact());
-        assertFalse(updatedProject.producesMainArtifact());
-        assertSame(updatedProject.packaging(), updatedProject.packaging());
-
-        // project.getArtifacts() contains ONLY POM artifact (directory is NOT exposed as main artifact)
-        List<ProducedArtifact> artifacts = updatedProject.getArtifacts();
-        assertEquals(1, artifacts.size());
-        assertTrue(artifacts.contains(pomProduced));
-        assertFalse(artifacts.contains(jarProduced));
-        assertFalse(updatedProject.mainArtifact().isPresent());
+        assertEquals(1, projectManager.getSourceRoots(project).size());
+        assertTrue(projectManager.getPath(project).isEmpty());
 
         // Legacy MavenProject.getArtifact() remains intact for backward compatibility
         assertEquals(legacyArtifact, mavenProject.getArtifact());
@@ -455,12 +478,10 @@ class DefaultProjectManagerTest {
     }
 
     private static Project project(InternalMavenSession session, MavenProject mavenProject) {
-        DefaultProject project = new DefaultProject(session, mavenProject);
+        DefaultProject project = LegacyProjectAdapter.snapshot(session, mavenProject);
+        mavenProject.getMutableProject().initialize(project);
         when(session.getMavenProject(Mockito.any(Project.class))).thenReturn(mavenProject);
-        when(session.updateProject(Mockito.any(Project.class))).thenAnswer(invocation -> {
-            DefaultProject supplied = invocation.getArgument(0);
-            return supplied.mutableProject().update(current -> ((DefaultProject) current).newSnapshot(mavenProject));
-        });
+        when(session.getMutableProject(Mockito.any(Project.class))).thenReturn(mavenProject.getMutableProject());
         return project;
     }
 }

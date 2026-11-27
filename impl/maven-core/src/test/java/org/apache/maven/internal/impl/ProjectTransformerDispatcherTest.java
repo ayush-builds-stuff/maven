@@ -33,7 +33,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProjectTransformerDispatcherTest {
@@ -69,8 +72,10 @@ class ProjectTransformerDispatcherTest {
         ProjectTransformerDispatcher.transformProjects(mavenSession, List.of(addProperty, addProperty2));
 
         assertEquals(List.of("addProperty", "addProperty2"), calls);
-        assertEquals(
-                "yes", mavenProject.getModel().getDelegate().getProperties().get("second"));
+        verify(apiSession)
+                .replaceProjectModel(
+                        eq(apiProject),
+                        argThat(model -> "yes".equals(model.getProperties().get("second"))));
     }
 
     @Test

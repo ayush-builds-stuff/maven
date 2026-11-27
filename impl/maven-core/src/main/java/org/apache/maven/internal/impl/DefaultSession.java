@@ -35,6 +35,7 @@ import org.apache.maven.api.Session;
 import org.apache.maven.api.Version;
 import org.apache.maven.api.annotations.Nonnull;
 import org.apache.maven.api.annotations.Nullable;
+import org.apache.maven.api.model.Model;
 import org.apache.maven.api.services.Lookup;
 import org.apache.maven.api.services.LookupException;
 import org.apache.maven.api.services.MavenException;
@@ -165,12 +166,15 @@ public class DefaultSession extends AbstractSession implements InternalMavenSess
             return null;
         }
         synchronized (projects) {
-            MutableProject mutableProject = projects.allProjects.get(project);
+            MutableProject<org.apache.maven.artifact.Artifact> mutableProject = projects.allProjects.get(project);
             if (mutableProject == null) {
-                DefaultProject snapshot = new DefaultProject(this, project);
-                mutableProject = snapshot.mutableProject();
+                mutableProject = project.getMutableProject();
+                if (mutableProject.projectOrNull() == null) {
+                    mutableProject.initialize(LegacyProjectAdapter.snapshot(this, project));
+                }
                 projects.allProjects.put(project, mutableProject);
                 projects.legacyProjects.put(mutableProject, project);
+                projects.projectStates.put(mutableProject.project(), mutableProject);
             }
             return mutableProject.project();
         }
@@ -179,17 +183,33 @@ public class DefaultSession extends AbstractSession implements InternalMavenSess
     @Override
     public MavenProject getMavenProject(Project project) {
         synchronized (projects) {
+            MutableProject<org.apache.maven.artifact.Artifact> mutableProject = projects.projectStates.get(project);
             return requireNonNull(
-                    projects.legacyProjects.get(((DefaultProject) project).mutableProject()),
-                    "project is not associated with session");
+                    projects.legacyProjects.get(mutableProject), "project is not associated with session");
         }
     }
 
     @Override
-    public Project updateProject(Project project) {
-        DefaultProject snapshot = (DefaultProject) project;
-        MavenProject mavenProject = getMavenProject(project);
-        return snapshot.mutableProject().update(current -> ((DefaultProject) current).newSnapshot(mavenProject));
+    public MutableProject<org.apache.maven.artifact.Artifact> getMutableProject(Project project) {
+        synchronized (projects) {
+            return requireNonNull(projects.projectStates.get(project), "project is not associated with session");
+        }
+    }
+
+    @Override
+    public Project replaceProjectModel(Project project, Model model) {
+        requireNonNull(project, "project cannot be null");
+        requireNonNull(model, "model cannot be null");
+        synchronized (projects) {
+            MutableProject<org.apache.maven.artifact.Artifact> mutableProject =
+                    requireNonNull(projects.projectStates.get(project), "project is not associated with session");
+            DefaultProject replacement = ((DefaultProject) project).withModel(model);
+            mutableProject.replace(project, replacement);
+            projects.projectStates.put(replacement, mutableProject);
+            requireNonNull(projects.legacyProjects.get(mutableProject), "project is not associated with session")
+                    .setModel(new org.apache.maven.model.Model(model));
+            return replacement;
+        }
     }
 
     @Override
@@ -317,8 +337,13 @@ public class DefaultSession extends AbstractSession implements InternalMavenSess
     }
 
     private static final class ProjectRegistry {
-        private final Map<MavenProject, MutableProject> allProjects = new IdentityHashMap<>();
-        private final Map<MutableProject, MavenProject> legacyProjects = new IdentityHashMap<>();
+        // Identity mappings intentionally retain temporary forked project clones for the session lifetime.
+        private final Map<MavenProject, MutableProject<org.apache.maven.artifact.Artifact>> allProjects =
+                new IdentityHashMap<>();
+        private final Map<MutableProject<org.apache.maven.artifact.Artifact>, MavenProject> legacyProjects =
+                new IdentityHashMap<>();
+        private final Map<Project, MutableProject<org.apache.maven.artifact.Artifact>> projectStates =
+                new IdentityHashMap<>();
     }
 
     @Override

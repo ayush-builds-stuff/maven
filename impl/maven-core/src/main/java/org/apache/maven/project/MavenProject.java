@@ -51,6 +51,7 @@ import org.apache.maven.artifact.handler.ArtifactHandler;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.artifact.resolver.filter.ArtifactFilter;
 import org.apache.maven.impl.DefaultSourceRoot;
+import org.apache.maven.impl.MutableProject;
 import org.apache.maven.lifecycle.internal.DefaultProjectArtifactFactory;
 import org.apache.maven.model.Build;
 import org.apache.maven.model.CiManagement;
@@ -140,16 +141,11 @@ public class MavenProject implements Cloneable {
 
     private List<RemoteRepository> remotePluginRepositories;
 
-    private List<Artifact> attachedArtifacts = new ArrayList<>();
-
     private MavenProject executionProject;
 
     private List<MavenProject> collectedProjects;
 
-    /**
-     * All sources of this project, in the order they were added.
-     */
-    Set<SourceRoot> sources = new LinkedHashSet<>();
+    private MutableProject<Artifact> mutableProject = new MutableProject<>();
 
     @Deprecated
     private ArtifactRepository releaseArtifactRepository;
@@ -328,7 +324,7 @@ public class MavenProject implements Cloneable {
      * @since 4.0.0
      */
     public void addSourceRoot(SourceRoot source) {
-        sources.add(source);
+        mutableProject.addSourceRoot(source);
     }
 
     /**
@@ -384,7 +380,7 @@ public class MavenProject implements Cloneable {
         Path path = getBaseDirectory()
                 .resolve(Objects.requireNonNull(directory, "directory cannot be null"))
                 .normalize();
-        sources.removeIf(source -> source.scope() == scope
+        mutableProject.removeSourceRoots(source -> source.scope() == scope
                 && source.language() == language
                 && source.directory().equals(path));
     }
@@ -442,7 +438,7 @@ public class MavenProject implements Cloneable {
      * @see #addSourceRoot(SourceRoot)
      */
     public Collection<SourceRoot> getSourceRoots() {
-        return Collections.unmodifiableCollection(sources);
+        return mutableProject.sourceRoots();
     }
 
     /**
@@ -459,7 +455,7 @@ public class MavenProject implements Cloneable {
      * @since 4.0.0
      */
     public Stream<SourceRoot> getEnabledSourceRoots(ProjectScope scope, Language language) {
-        Stream<SourceRoot> stream = sources.stream().filter(SourceRoot::enabled);
+        Stream<SourceRoot> stream = getSourceRoots().stream().filter(SourceRoot::enabled);
         if (scope != null) {
             stream = stream.filter(source -> scope.equals(source.scope()));
         }
@@ -611,7 +607,8 @@ public class MavenProject implements Cloneable {
     }
 
     public String getGroupId() {
-        String groupId = getModel().getGroupId();
+        org.apache.maven.api.Project project = mutableProject.projectOrNull();
+        String groupId = project != null ? project.groupId() : getModel().getGroupId();
 
         if ((groupId == null) && (getModel().getParent() != null)) {
             groupId = getModel().getParent().getGroupId();
@@ -625,7 +622,8 @@ public class MavenProject implements Cloneable {
     }
 
     public String getArtifactId() {
-        return getModel().getArtifactId();
+        org.apache.maven.api.Project project = mutableProject.projectOrNull();
+        return project != null ? project.artifactId() : getModel().getArtifactId();
     }
 
     public void setName(String name) {
@@ -645,7 +643,8 @@ public class MavenProject implements Cloneable {
     }
 
     public String getVersion() {
-        String version = getModel().getVersion();
+        org.apache.maven.api.Project project = mutableProject.projectOrNull();
+        String version = project != null ? project.version() : getModel().getVersion();
 
         if ((version == null) && (getModel().getParent() != null)) {
             version = getModel().getParent().getVersion();
@@ -655,7 +654,8 @@ public class MavenProject implements Cloneable {
     }
 
     public String getPackaging() {
-        return getModel().getPackaging();
+        org.apache.maven.api.Project project = mutableProject.projectOrNull();
+        return project != null ? project.packaging().id() : getModel().getPackaging();
     }
 
     public void setPackaging(String packaging) {
@@ -1098,13 +1098,8 @@ public class MavenProject implements Cloneable {
      * @throws DuplicateArtifactAttachmentException will never happen but leave it for backward compatibility
      */
     public void addAttachedArtifact(Artifact artifact) throws DuplicateArtifactAttachmentException {
-        // if already there we remove it and add again
-        int index = attachedArtifacts.indexOf(artifact);
-        if (index >= 0) {
+        if (mutableProject.addAttachedArtifact(artifact)) {
             LOGGER.warn("artifact '{}' already attached, replacing previous instance", artifact);
-            attachedArtifacts.set(index, artifact);
-        } else {
-            attachedArtifacts.add(artifact);
         }
     }
 
@@ -1114,10 +1109,7 @@ public class MavenProject implements Cloneable {
      * @return the attached artifacts of this project
      */
     public List<Artifact> getAttachedArtifacts() {
-        if (attachedArtifacts == null) {
-            attachedArtifacts = new ArrayList<>();
-        }
-        return Collections.unmodifiableList(attachedArtifacts);
+        return mutableProject.attachedArtifacts();
     }
 
     public Xpp3Dom getGoalConfiguration(
@@ -1248,7 +1240,7 @@ public class MavenProject implements Cloneable {
     }
 
     public Properties getProperties() {
-        return getModel().getProperties();
+        return mutableProject.properties();
     }
 
     public List<String> getFilters() {
@@ -1316,10 +1308,11 @@ public class MavenProject implements Cloneable {
 
     public void setModel(Model model) {
         this.model = model;
+        mutableProject.setProperties(model.getProperties());
     }
 
     protected void setAttachedArtifacts(List<Artifact> attachedArtifacts) {
-        this.attachedArtifacts = attachedArtifacts;
+        mutableProject.setAttachedArtifacts(attachedArtifacts);
     }
 
     /**
@@ -1327,7 +1320,7 @@ public class MavenProject implements Cloneable {
      */
     @Deprecated
     private void setSourceRootDirs(ProjectScope scope, Language language, List<String> roots) {
-        sources.removeIf((source) -> scope.equals(source.scope()) && language.equals(source.language()));
+        mutableProject.removeSourceRoots(source -> scope.equals(source.scope()) && language.equals(source.language()));
         Path directory = getBaseDirectory();
         for (String root : roots) {
             addSourceRoot(new DefaultSourceRoot(scope, language, directory.resolve(root)));
@@ -1359,6 +1352,8 @@ public class MavenProject implements Cloneable {
     }
 
     private void deepCopy(MavenProject project) {
+        mutableProject = new MutableProject<>();
+
         // disown the parent
 
         // copy fields
@@ -1410,10 +1405,7 @@ public class MavenProject implements Cloneable {
             setAttachedArtifacts(new ArrayList<>(project.getAttachedArtifacts()));
         }
 
-        // This property is not handled like others as we don't use public API.
-        // The whole implementation of this `deepCopy` method may need revision,
-        // but it would be the topic for a separated commit.
-        sources = new LinkedHashSet<>(project.sources);
+        mutableProject.setSourceRoots(project.getSourceRoots());
 
         if (project.getModel() != null) {
             setModel(project.getModel().clone());
@@ -1434,6 +1426,10 @@ public class MavenProject implements Cloneable {
         }
 
         lifecyclePhases.addAll(project.lifecyclePhases);
+    }
+
+    public MutableProject<Artifact> getMutableProject() {
+        return mutableProject;
     }
 
     private static String getProjectReferenceId(String groupId, String artifactId, String version) {

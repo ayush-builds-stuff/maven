@@ -71,7 +71,7 @@ public final class ProjectTransformerDispatcher {
                 }
 
                 if (model != project.model()) {
-                    mavenProject.setModel(new org.apache.maven.model.Model(model));
+                    apiSession.replaceProjectModel(project, model);
                 }
             }
         } finally {

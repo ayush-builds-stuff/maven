@@ -24,8 +24,10 @@ import org.apache.maven.api.Project;
 import org.apache.maven.api.RemoteRepository;
 import org.apache.maven.api.Session;
 import org.apache.maven.api.annotations.Nullable;
+import org.apache.maven.api.model.Model;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.impl.InternalSession;
+import org.apache.maven.impl.MutableProject;
 
 import static org.apache.maven.internal.impl.CoreUtils.cast;
 
@@ -49,7 +51,9 @@ public interface InternalMavenSession extends InternalSession {
 
     org.apache.maven.project.MavenProject getMavenProject(Project project);
 
-    Project updateProject(Project project);
+    MutableProject<org.apache.maven.artifact.Artifact> getMutableProject(Project project);
+
+    Project replaceProjectModel(Project project, Model model);
 
     List<org.apache.maven.artifact.repository.ArtifactRepository> toArtifactRepositories(
             List<RemoteRepository> repositories);
