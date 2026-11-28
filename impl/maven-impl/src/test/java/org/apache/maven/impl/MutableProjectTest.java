@@ -90,4 +90,23 @@ class MutableProjectTest {
         assertEquals(List.of("first", "second"), project.attachedArtifacts());
         assertSame(properties, project.properties());
     }
+
+    @Test
+    void returnsBuildTimeStateSnapshots() {
+        MutableProject<String> project = new MutableProject<>();
+        SourceRoot original = mock(SourceRoot.class);
+        SourceRoot replacement = mock(SourceRoot.class);
+        project.setSourceRoots(List.of(original));
+        project.setAttachedArtifacts(List.of("original"));
+
+        var sourceRoots = project.sourceRoots();
+        var attachedArtifacts = project.attachedArtifacts();
+        project.setSourceRoots(List.of(replacement));
+        project.setAttachedArtifacts(List.of("replacement"));
+
+        assertEquals(List.of(original), sourceRoots.stream().toList());
+        assertEquals(List.of("original"), attachedArtifacts);
+        assertEquals(List.of(replacement), project.sourceRoots().stream().toList());
+        assertEquals(List.of("replacement"), project.attachedArtifacts());
+    }
 }

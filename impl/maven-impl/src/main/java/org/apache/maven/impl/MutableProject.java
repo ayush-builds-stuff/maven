@@ -20,6 +20,7 @@ package org.apache.maven.impl;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -105,8 +106,8 @@ public final class MutableProject<A> {
     }
 
     @Nonnull
-    public Collection<SourceRoot> sourceRoots() {
-        return Collections.unmodifiableSet(sourceRoots);
+    public synchronized Collection<SourceRoot> sourceRoots() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(sourceRoots));
     }
 
     public synchronized boolean addAttachedArtifact(@Nonnull A artifact) {
@@ -126,8 +127,8 @@ public final class MutableProject<A> {
     }
 
     @Nonnull
-    public List<A> attachedArtifacts() {
-        return Collections.unmodifiableList(attachedArtifacts);
+    public synchronized List<A> attachedArtifacts() {
+        return List.copyOf(attachedArtifacts);
     }
 
     public void setProperties(@Nonnull Properties properties) {

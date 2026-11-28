@@ -205,6 +205,7 @@ public class DefaultSession extends AbstractSession implements InternalMavenSess
                     requireNonNull(projects.projectStates.get(project), "project is not associated with session");
             DefaultProject replacement = ((DefaultProject) project).withModel(model);
             mutableProject.replace(project, replacement);
+            // Retain old snapshots so callers holding them can still resolve the stable project identity.
             projects.projectStates.put(replacement, mutableProject);
             requireNonNull(projects.legacyProjects.get(mutableProject), "project is not associated with session")
                     .setModel(new org.apache.maven.model.Model(model));
